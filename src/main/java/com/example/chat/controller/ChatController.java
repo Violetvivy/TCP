@@ -95,10 +95,8 @@ public class ChatController {
         if (receiver == null || "所有人".equals(receiver)) {
             messagingTemplate.convertAndSend("/topic/public", message);
         } else {
-            // 私聊：发送给接收者
+            // 私聊：只发送给接收者，不发送回发送者
             messagingTemplate.convertAndSendToUser(receiver, "/queue/private", message);
-            // 同时通过公共频道发送给发送者（这样发送者能立即看到）
-            messagingTemplate.convertAndSend("/topic/public", message);
         }
     }
     
