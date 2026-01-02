@@ -118,9 +118,16 @@ class ChatClient {
             // 发送加入聊天消息
             this.sendJoinMessage();
             
-            // 订阅公共消息
+            // 订阅公共消息（用于系统消息和群聊）
             this.stompClient.subscribe('/topic/public', (message) => {
-                this.handlePublicMessage(JSON.parse(message.body));
+                const msg = JSON.parse(message.body);
+                // 区分系统消息和普通消息
+                if (msg.type === 'JOIN' || msg.type === 'LEAVE') {
+                    this.handlePublicMessage(msg);
+                } else {
+                    // 群聊消息
+                    this.handleGroupMessage(msg);
+                }
             });
             
             // 订阅私聊消息
@@ -223,22 +230,13 @@ class ChatClient {
         const message = {
             type: 'TEXT',
             sender: this.username,
-            receiver: this.currentChatUser === '所有人' ? null : this.currentChatUser,
+            receiver: this.currentChatUser === '所有人' ? '所有人' : this.currentChatUser,
             content: content,
             timestamp: new Date().toISOString()
         };
         
         // 发送消息
-        if (this.currentChatUser === '所有人') {
-            // 广播消息（这里简化处理，实际应该通过服务器广播）
-            this.stompClient.send('/app/chat.private', {}, JSON.stringify({
-                ...message,
-                receiver: '所有人'
-            }));
-        } else {
-            // 私聊消息
-            this.stompClient.send('/app/chat.private', {}, JSON.stringify(message));
-        }
+        this.stompClient.send('/app/chat.private', {}, JSON.stringify(message));
         
         // 清空输入框
         this.messageInput.value = '';
@@ -259,36 +257,44 @@ class ChatClient {
             return;
         }
         
+        // 检查文件大小（限制为5MB）
+        if (this.fileToSend.size > 5 * 1024 * 1024) {
+            alert('文件大小不能超过5MB！');
+            return;
+        }
+        
         const reader = new FileReader();
         reader.onload = (e) => {
-            const base64Data = e.target.result.split(',')[1];
-            
-            const message = {
-                type: this.fileToSend.type.startsWith('image/') ? 'IMAGE' : 'FILE',
-                sender: this.username,
-                receiver: this.currentChatUser === '所有人' ? null : this.currentChatUser,
-                content: base64Data,
-                fileName: this.fileToSend.name,
-                fileType: this.fileToSend.type,
-                fileSize: this.fileToSend.size,
-                timestamp: new Date().toISOString()
-            };
-            
-            // 发送消息
-            if (this.currentChatUser === '所有人') {
-                this.stompClient.send('/app/chat.private', {}, JSON.stringify({
-                    ...message,
-                    receiver: '所有人'
-                }));
-            } else {
+            try {
+                const base64Data = e.target.result.split(',')[1];
+                
+                const message = {
+                    type: this.fileToSend.type.startsWith('image/') ? 'IMAGE' : 'FILE',
+                    sender: this.username,
+                    receiver: this.currentChatUser === '所有人' ? '所有人' : this.currentChatUser,
+                    content: base64Data,
+                    fileName: this.fileToSend.name,
+                    fileType: this.fileToSend.type,
+                    fileSize: this.fileToSend.size,
+                    timestamp: new Date().toISOString()
+                };
+                
+                // 发送消息
                 this.stompClient.send('/app/chat.private', {}, JSON.stringify(message));
+                
+                // 添加到聊天历史（发送方视角）
+                this.addMessageToHistory(message, true);
+                
+                // 关闭模态框
+                this.closeFileModal();
+            } catch (error) {
+                console.error('发送文件失败:', error);
+                alert('发送文件失败，请重试！');
             }
-            
-            // 添加到聊天历史（发送方视角）
-            this.addMessageToHistory(message, true);
-            
-            // 关闭模态框
-            this.closeFileModal();
+        };
+        
+        reader.onerror = () => {
+            alert('读取文件失败，请重试！');
         };
         
         reader.readAsDataURL(this.fileToSend);
@@ -299,13 +305,28 @@ class ChatClient {
         this.addSystemMessage(message.content);
     }
     
+    // 处理群聊消息
+    handleGroupMessage(message) {
+        // 群聊消息总是显示在"所有人"聊天中
+        const isFromMe = message.sender === this.username;
+        
+        // 如果当前正在查看"所有人"聊天，则显示消息
+        if (this.currentChatUser === '所有人') {
+            this.addMessageToDisplay(message, isFromMe);
+        }
+        
+        // 保存到聊天历史
+        this.addMessageToHistory(message, isFromMe);
+        
+        // 更新本地存储
+        this.saveChatHistory();
+    }
+    
     // 处理私聊消息
     handlePrivateMessage(message) {
         // 确定消息的发送者和接收者
         const isFromMe = message.sender === this.username;
-        const isToMe = message.receiver === this.username || 
-                      (message.receiver === null && this.currentChatUser === '所有人') ||
-                      (message.receiver === '所有人' && this.currentChatUser === '所有人');
+        const isToMe = message.receiver === this.username;
         
         // 如果消息是发送给我的，或者是我发送的
         if (isToMe || isFromMe) {
@@ -313,7 +334,7 @@ class ChatClient {
             let chatUser;
             if (isFromMe) {
                 // 我发送的消息，接收者就是聊天对象
-                chatUser = message.receiver || '所有人';
+                chatUser = message.receiver;
             } else {
                 // 我接收的消息，发送者就是聊天对象
                 chatUser = message.sender;
@@ -408,24 +429,29 @@ class ChatClient {
     
     // 下载文件
     downloadFile(filename, base64Data, fileType) {
-        const byteCharacters = atob(base64Data);
-        const byteNumbers = new Array(byteCharacters.length);
-        
-        for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        try {
+            const byteCharacters = atob(base64Data);
+            const byteNumbers = new Array(byteCharacters.length);
+            
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: fileType });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('下载文件失败:', error);
+            alert('下载文件失败，请重试！');
         }
-        
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: fileType });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
     }
     
     // 更新在线用户列表

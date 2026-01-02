@@ -83,19 +83,24 @@ public class ChatController {
         String sender = message.getSender();
         String receiver = message.getReceiver();
         
-        // 发送给接收者（使用用户目的地）
-        messagingTemplate.convertAndSendToUser(
-            receiver, 
-            "/queue/private", 
-            message
-        );
-        
-        // 同时发送给发送者自己（用于确认发送成功）
-        messagingTemplate.convertAndSendToUser(
-            sender,
-            "/queue/private",
-            message
-        );
+        // 如果接收者为null或"所有人"，则广播给所有用户
+        if (receiver == null || "所有人".equals(receiver)) {
+            messagingTemplate.convertAndSend("/topic/public", message);
+        } else {
+            // 发送给接收者（使用用户目的地）
+            messagingTemplate.convertAndSendToUser(
+                receiver, 
+                "/queue/private", 
+                message
+            );
+            
+            // 同时发送给发送者自己（用于确认发送成功）
+            messagingTemplate.convertAndSendToUser(
+                sender,
+                "/queue/private",
+                message
+            );
+        }
     }
     
     /**
