@@ -441,12 +441,17 @@
         <div class="chat-panel">
             <div class="chat-header">
                 <h2><i class="fas fa-comments"></i> 聊天室</h2>
-                <div class="current-chat-info">
-                    <div class="user-avatar" id="current-chat-avatar">?</div>
-                    <div>
-                        <div id="current-chat-name">未选择聊天对象</div>
-                        <div id="current-chat-status" style="font-size: 0.9rem; color: #6c757d;">请从左侧选择用户</div>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <div class="current-chat-info">
+                        <div class="user-avatar" id="current-chat-avatar">?</div>
+                        <div>
+                            <div id="current-chat-name">未选择聊天对象</div>
+                            <div id="current-chat-status" style="font-size: 0.9rem; color: #6c757d;">请从左侧选择用户</div>
+                        </div>
                     </div>
+                    <button id="clear-chat-btn" class="btn btn-danger" style="padding: 8px 15px; font-size: 0.9rem;">
+                        <i class="fas fa-trash-alt"></i> 清空聊天
+                    </button>
                 </div>
             </div>
             

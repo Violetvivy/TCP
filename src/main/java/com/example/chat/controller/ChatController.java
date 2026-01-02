@@ -5,7 +5,9 @@ import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
@@ -93,9 +95,10 @@ public class ChatController {
         if (receiver == null || "所有人".equals(receiver)) {
             messagingTemplate.convertAndSend("/topic/public", message);
         } else {
-            // 私聊：发送给接收者和发送者自己
+            // 私聊：发送给接收者
             messagingTemplate.convertAndSendToUser(receiver, "/queue/private", message);
-            messagingTemplate.convertAndSendToUser(sender, "/queue/private", message);
+            // 同时通过公共频道发送给发送者（这样发送者能立即看到）
+            messagingTemplate.convertAndSend("/topic/public", message);
         }
     }
     
@@ -118,6 +121,19 @@ public class ChatController {
             @RequestParam String user2) {
         String chatKey = getChatKey(user1, user2);
         return chatHistories.getOrDefault(chatKey, new ArrayList<>());
+    }
+    
+    /**
+     * 清空聊天历史
+     */
+    @DeleteMapping("/api/clear-chat-history")
+    @ResponseBody
+    public ResponseEntity<String> clearChatHistory(
+            @RequestParam String user1,
+            @RequestParam String user2) {
+        String chatKey = getChatKey(user1, user2);
+        chatHistories.remove(chatKey);
+        return ResponseEntity.ok("聊天历史已清空");
     }
     
     /**

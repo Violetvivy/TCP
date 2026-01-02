@@ -24,6 +24,7 @@ class ChatClient {
         this.sendBtn = document.getElementById('send-btn');
         this.fileBtn = document.getElementById('file-btn');
         this.imageBtn = document.getElementById('image-btn');
+        this.clearChatBtn = document.getElementById('clear-chat-btn');
         
         // 状态元素
         this.connectionStatus = document.getElementById('connection-status');
@@ -56,6 +57,9 @@ class ChatClient {
         
         // 发送消息按钮
         this.sendBtn.addEventListener('click', () => this.sendMessage());
+        
+        // 清空聊天按钮
+        this.clearChatBtn.addEventListener('click', () => this.clearChat());
         
         // 按Enter发送消息（Ctrl+Enter换行）
         this.messageInput.addEventListener('keydown', (e) => {
@@ -244,7 +248,8 @@ class ChatClient {
         // 清空输入框
         this.messageInput.value = '';
         
-        // 添加到本地聊天历史
+        // 立即显示发送的消息（解决私聊消息不立即显示的问题）
+        this.addMessageToDisplay(message, true);
         this.addMessageToLocalHistory(message, true);
     }
     
@@ -289,7 +294,8 @@ class ChatClient {
             // 通过WebSocket发送文件消息
             this.stompClient.send('/app/chat.message', {}, JSON.stringify(message));
             
-            // 添加到本地聊天历史
+            // 立即显示发送的文件消息
+            this.addMessageToDisplay(message, true);
             this.addMessageToLocalHistory(message, true);
             
             // 关闭模态框
@@ -303,6 +309,38 @@ class ChatClient {
             this.sendFileBtn.disabled = false;
             this.sendFileBtn.textContent = '发送文件';
         });
+    }
+    
+    // 清空当前聊天内容
+    clearChat() {
+        if (!confirm(`确定要清空与 ${this.currentChatUser} 的聊天记录吗？`)) {
+            return;
+        }
+        
+        // 清空本地存储
+        this.chatHistories.delete(this.currentChatUser);
+        this.saveLocalChatHistory();
+        
+        // 清空显示
+        this.chatMessages.innerHTML = '';
+        this.displayedMessageIds.clear();
+        
+        // 显示系统提示
+        if (this.currentChatUser === '所有人') {
+            this.addSystemMessage('已清空群聊记录。');
+        } else {
+            this.addSystemMessage(`已清空与 ${this.currentChatUser} 的聊天记录。`);
+        }
+        
+        // 如果已连接，可以请求服务器清空历史记录
+        if (this.stompClient && this.username) {
+            const otherUser = this.currentChatUser === '所有人' ? '所有人' : this.currentChatUser;
+            fetch(`/api/clear-chat-history?user1=${this.username}&user2=${otherUser}`, {
+                method: 'DELETE'
+            }).catch(error => {
+                console.error('清空服务器历史记录失败:', error);
+            });
+        }
     }
     
     // 处理系统消息（用户加入/离开）
