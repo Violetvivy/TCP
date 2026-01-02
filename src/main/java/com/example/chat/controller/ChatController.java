@@ -7,11 +7,11 @@ import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 
 import java.time.LocalDateTime;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Controller
@@ -21,6 +21,9 @@ public class ChatController {
     
     // 存储在线用户
     private final Set<String> onlineUsers = ConcurrentHashMap.newKeySet();
+    
+    // 存储聊天记录：key为"用户1-用户2"或"用户-所有人"
+    private final Map<String, List<ChatMessage>> chatHistories = new ConcurrentHashMap<>();
     
     public ChatController(SimpMessagingTemplate messagingTemplate) {
         this.messagingTemplate = messagingTemplate;
@@ -74,32 +77,25 @@ public class ChatController {
     }
     
     /**
-     * 处理私聊消息
+     * 处理聊天消息
      */
-    @MessageMapping("/chat.private")
-    public void sendPrivateMessage(@Payload ChatMessage message) {
+    @MessageMapping("/chat.message")
+    public void sendMessage(@Payload ChatMessage message) {
         message.setTimestamp(LocalDateTime.now());
         
         String sender = message.getSender();
         String receiver = message.getReceiver();
         
+        // 保存聊天记录
+        saveChatMessage(message);
+        
         // 如果接收者为null或"所有人"，则广播给所有用户
         if (receiver == null || "所有人".equals(receiver)) {
             messagingTemplate.convertAndSend("/topic/public", message);
         } else {
-            // 发送给接收者（使用用户目的地）
-            messagingTemplate.convertAndSendToUser(
-                receiver, 
-                "/queue/private", 
-                message
-            );
-            
-            // 同时发送给发送者自己（用于确认发送成功）
-            messagingTemplate.convertAndSendToUser(
-                sender,
-                "/queue/private",
-                message
-            );
+            // 私聊：发送给接收者和发送者自己
+            messagingTemplate.convertAndSendToUser(receiver, "/queue/private", message);
+            messagingTemplate.convertAndSendToUser(sender, "/queue/private", message);
         }
     }
     
@@ -113,9 +109,64 @@ public class ChatController {
     }
     
     /**
+     * 获取聊天历史
+     */
+    @GetMapping("/api/chat-history")
+    @ResponseBody
+    public List<ChatMessage> getChatHistory(
+            @RequestParam String user1,
+            @RequestParam String user2) {
+        String chatKey = getChatKey(user1, user2);
+        return chatHistories.getOrDefault(chatKey, new ArrayList<>());
+    }
+    
+    /**
      * 发送在线用户列表给所有客户端
      */
     private void sendOnlineUsers() {
         messagingTemplate.convertAndSend("/topic/online-users", new HashSet<>(onlineUsers));
+    }
+    
+    /**
+     * 保存聊天消息
+     */
+    private void saveChatMessage(ChatMessage message) {
+        String sender = message.getSender();
+        String receiver = message.getReceiver();
+        
+        if (receiver == null || "所有人".equals(receiver)) {
+            // 群聊消息：为每个在线用户保存
+            for (String user : onlineUsers) {
+                String chatKey = getChatKey(user, "所有人");
+                chatHistories.computeIfAbsent(chatKey, k -> new ArrayList<>()).add(message);
+                
+                // 限制历史记录大小
+                List<ChatMessage> history = chatHistories.get(chatKey);
+                if (history.size() > 100) {
+                    history.remove(0);
+                }
+            }
+        } else {
+            // 私聊消息
+            String chatKey = getChatKey(sender, receiver);
+            chatHistories.computeIfAbsent(chatKey, k -> new ArrayList<>()).add(message);
+            
+            // 限制历史记录大小
+            List<ChatMessage> history = chatHistories.get(chatKey);
+            if (history.size() > 100) {
+                history.remove(0);
+            }
+        }
+    }
+    
+    /**
+     * 生成聊天键（保证顺序一致）
+     */
+    private String getChatKey(String user1, String user2) {
+        if (user1.compareTo(user2) < 0) {
+            return user1 + "-" + user2;
+        } else {
+            return user2 + "-" + user1;
+        }
     }
 }

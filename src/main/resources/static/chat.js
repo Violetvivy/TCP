@@ -4,12 +4,12 @@ class ChatClient {
         this.stompClient = null;
         this.username = null;
         this.currentChatUser = '所有人';
-        this.chatHistories = new Map(); // 存储与每个用户的聊天历史
+        this.chatHistories = new Map(); // 本地存储的聊天历史
         this.fileToSend = null;
         
         this.initializeElements();
         this.initializeEventListeners();
-        this.loadChatHistory();
+        this.loadLocalChatHistory();
     }
     
     initializeElements() {
@@ -121,18 +121,16 @@ class ChatClient {
             // 订阅公共消息（用于系统消息和群聊）
             this.stompClient.subscribe('/topic/public', (message) => {
                 const msg = JSON.parse(message.body);
-                // 区分系统消息和普通消息
                 if (msg.type === 'JOIN' || msg.type === 'LEAVE') {
-                    this.handlePublicMessage(msg);
+                    this.handleSystemMessage(msg);
                 } else {
-                    // 群聊消息
-                    this.handleGroupMessage(msg);
+                    this.handleChatMessage(msg);
                 }
             });
             
             // 订阅私聊消息
             this.stompClient.subscribe('/user/queue/private', (message) => {
-                this.handlePrivateMessage(JSON.parse(message.body));
+                this.handleChatMessage(JSON.parse(message.body));
             });
             
             // 订阅在线用户列表更新
@@ -142,6 +140,9 @@ class ChatClient {
             
             // 获取初始在线用户列表
             this.fetchOnlineUsers();
+            
+            // 加载服务器端的聊天历史
+            this.loadServerChatHistory();
             
         }, (error) => {
             console.error('Connection error: ', error);
@@ -236,16 +237,16 @@ class ChatClient {
         };
         
         // 发送消息
-        this.stompClient.send('/app/chat.private', {}, JSON.stringify(message));
+        this.stompClient.send('/app/chat.message', {}, JSON.stringify(message));
         
         // 清空输入框
         this.messageInput.value = '';
         
-        // 添加到聊天历史（发送方视角）
-        this.addMessageToHistory(message, true);
+        // 添加到本地聊天历史
+        this.addMessageToLocalHistory(message, true);
     }
     
-    // 发送文件
+    // 发送文件（使用HTTP上传）
     sendFile() {
         if (!this.fileToSend) {
             alert('请先选择文件！');
@@ -263,94 +264,69 @@ class ChatClient {
             return;
         }
         
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const base64Data = e.target.result.split(',')[1];
-                
-                const message = {
-                    type: this.fileToSend.type.startsWith('image/') ? 'IMAGE' : 'FILE',
-                    sender: this.username,
-                    receiver: this.currentChatUser === '所有人' ? '所有人' : this.currentChatUser,
-                    content: base64Data,
-                    fileName: this.fileToSend.name,
-                    fileType: this.fileToSend.type,
-                    fileSize: this.fileToSend.size,
-                    timestamp: new Date().toISOString()
-                };
-                
-                // 发送消息
-                this.stompClient.send('/app/chat.private', {}, JSON.stringify(message));
-                
-                // 添加到聊天历史（发送方视角）
-                this.addMessageToHistory(message, true);
-                
-                // 关闭模态框
-                this.closeFileModal();
-            } catch (error) {
-                console.error('发送文件失败:', error);
-                alert('发送文件失败，请重试！');
+        const formData = new FormData();
+        formData.append('file', this.fileToSend);
+        formData.append('sender', this.username);
+        formData.append('receiver', this.currentChatUser);
+        
+        // 显示上传中状态
+        this.sendFileBtn.disabled = true;
+        this.sendFileBtn.textContent = '上传中...';
+        
+        fetch('/api/files/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('上传失败');
             }
-        };
-        
-        reader.onerror = () => {
-            alert('读取文件失败，请重试！');
-        };
-        
-        reader.readAsDataURL(this.fileToSend);
+            return response.json();
+        })
+        .then(message => {
+            // 通过WebSocket发送文件消息
+            this.stompClient.send('/app/chat.message', {}, JSON.stringify(message));
+            
+            // 添加到本地聊天历史
+            this.addMessageToLocalHistory(message, true);
+            
+            // 关闭模态框
+            this.closeFileModal();
+        })
+        .catch(error => {
+            console.error('上传文件失败:', error);
+            alert('上传文件失败，请重试！');
+        })
+        .finally(() => {
+            this.sendFileBtn.disabled = false;
+            this.sendFileBtn.textContent = '发送文件';
+        });
     }
     
-    // 处理公共消息（用户加入/离开）
-    handlePublicMessage(message) {
+    // 处理系统消息（用户加入/离开）
+    handleSystemMessage(message) {
         this.addSystemMessage(message.content);
     }
     
-    // 处理群聊消息
-    handleGroupMessage(message) {
-        // 群聊消息总是显示在"所有人"聊天中
+    // 处理聊天消息
+    handleChatMessage(message) {
         const isFromMe = message.sender === this.username;
         
-        // 如果当前正在查看"所有人"聊天，则显示消息
-        if (this.currentChatUser === '所有人') {
+        // 确定消息属于哪个聊天
+        let chatUser;
+        if (isFromMe) {
+            chatUser = message.receiver || '所有人';
+        } else {
+            chatUser = message.sender === '所有人' ? '所有人' : message.sender;
+        }
+        
+        // 如果当前正在查看这个聊天，则显示消息
+        if (chatUser === this.currentChatUser) {
             this.addMessageToDisplay(message, isFromMe);
         }
         
-        // 保存到聊天历史
-        this.addMessageToHistory(message, isFromMe);
-        
-        // 更新本地存储
-        this.saveChatHistory();
-    }
-    
-    // 处理私聊消息
-    handlePrivateMessage(message) {
-        // 确定消息的发送者和接收者
-        const isFromMe = message.sender === this.username;
-        const isToMe = message.receiver === this.username;
-        
-        // 如果消息是发送给我的，或者是我发送的
-        if (isToMe || isFromMe) {
-            // 确定消息属于哪个聊天
-            let chatUser;
-            if (isFromMe) {
-                // 我发送的消息，接收者就是聊天对象
-                chatUser = message.receiver;
-            } else {
-                // 我接收的消息，发送者就是聊天对象
-                chatUser = message.sender;
-            }
-            
-            // 如果当前正在查看这个聊天，则显示消息
-            if (chatUser === this.currentChatUser) {
-                this.addMessageToDisplay(message, isFromMe);
-            }
-            
-            // 保存到聊天历史
-            this.addMessageToHistory(message, isFromMe);
-            
-            // 更新本地存储
-            this.saveChatHistory();
-        }
+        // 保存到本地聊天历史
+        this.addMessageToLocalHistory(message, isFromMe);
     }
     
     // 添加消息到显示
@@ -389,7 +365,7 @@ class ChatClient {
                 <div class="message-content">
                     <div>${this.escapeHtml(message.fileName)} (${this.formatFileSize(message.fileSize)})</div>
                     <div class="file-message">
-                        <a href="#" class="file-link" data-filename="${message.fileName}" data-content="${message.content}">
+                        <a href="${message.content}" class="file-link" download="${message.fileName}">
                             <i class="fas fa-download"></i> 下载文件
                         </a>
                     </div>
@@ -399,7 +375,7 @@ class ChatClient {
             contentHtml = `
                 <div class="message-content">
                     <div>${this.escapeHtml(message.fileName)}</div>
-                    <img src="data:${message.fileType};base64,${message.content}" 
+                    <img src="${message.content}" 
                          alt="${message.fileName}" 
                          class="image-message"
                          onclick="this.classList.toggle('expanded')">
@@ -415,43 +391,7 @@ class ChatClient {
             ${contentHtml}
         `;
         
-        // 添加文件下载功能
-        if (message.type === 'FILE') {
-            const downloadLink = messageElement.querySelector('.file-link');
-            downloadLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.downloadFile(message.fileName, message.content, message.fileType);
-            });
-        }
-        
         return messageElement;
-    }
-    
-    // 下载文件
-    downloadFile(filename, base64Data, fileType) {
-        try {
-            const byteCharacters = atob(base64Data);
-            const byteNumbers = new Array(byteCharacters.length);
-            
-            for (let i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: fileType });
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        } catch (error) {
-            console.error('下载文件失败:', error);
-            alert('下载文件失败，请重试！');
-        }
     }
     
     // 更新在线用户列表
@@ -547,6 +487,27 @@ class ChatClient {
             });
     }
     
+    // 加载服务器端的聊天历史
+    loadServerChatHistory() {
+        if (!this.username) return;
+        
+        // 加载与当前聊天用户的历史
+        const otherUser = this.currentChatUser === '所有人' ? '所有人' : this.currentChatUser;
+        fetch(`/api/chat-history?user1=${this.username}&user2=${otherUser}`)
+            .then(response => response.json())
+            .then(messages => {
+                // 显示历史消息
+                messages.forEach(message => {
+                    const isFromMe = message.sender === this.username;
+                    this.addMessageToDisplay(message, isFromMe);
+                    this.addMessageToLocalHistory(message, isFromMe);
+                });
+            })
+            .catch(error => {
+                console.error('Error loading chat history:', error);
+            });
+    }
+    
     // 打开文件上传模态框
     openFileModal() {
         if (!this.stompClient || !this.username) {
@@ -559,12 +520,12 @@ class ChatClient {
         this.filePreviewImage.classList.add('hidden');
         this.fileNameDisplay.textContent = '未选择文件';
         this.sendFileBtn.disabled = true;
+        this.sendFileBtn.textContent = '发送文件';
     }
     
     // 打开图片上传模态框
     openImageModal() {
         this.openFileModal();
-        // 可以在这里设置只接受图片文件
         this.fileInput.accept = 'image/*';
     }
     
@@ -597,9 +558,10 @@ class ChatClient {
         }
     }
     
-    // 添加消息到聊天历史
-    addMessageToHistory(message, isFromMe) {
-        const chatUser = isFromMe ? (message.receiver || '所有人') : message.sender;
+    // 添加消息到本地聊天历史
+    addMessageToLocalHistory(message, isFromMe) {
+        const chatUser = isFromMe ? (message.receiver || '所有人') : 
+                        (message.sender === '所有人' ? '所有人' : message.sender);
         
         if (!this.chatHistories.has(chatUser)) {
             this.chatHistories.set(chatUser, []);
@@ -615,10 +577,13 @@ class ChatClient {
         if (history.length > 100) {
             history.shift();
         }
+        
+        // 保存到本地存储
+        this.saveLocalChatHistory();
     }
     
-    // 加载聊天历史
-    loadChatHistory() {
+    // 加载本地聊天历史
+    loadLocalChatHistory() {
         const savedHistory = localStorage.getItem('chatHistory');
         if (savedHistory) {
             try {
@@ -634,15 +599,40 @@ class ChatClient {
     
     // 加载特定用户的聊天历史
     loadChatHistoryForUser(username) {
-        const history = this.chatHistories.get(username) || [];
-        
-        // 显示历史消息
-        history.forEach(message => {
+        // 先显示本地历史
+        const localHistory = this.chatHistories.get(username) || [];
+        localHistory.forEach(message => {
             this.addMessageToDisplay(message, message.isFromMe);
         });
         
+        // 然后加载服务器历史（如果已连接）
+        if (this.stompClient && this.username) {
+            const otherUser = username === '所有人' ? '所有人' : username;
+            fetch(`/api/chat-history?user1=${this.username}&user2=${otherUser}`)
+                .then(response => response.json())
+                .then(messages => {
+                    // 过滤掉已经显示的消息
+                    const newMessages = messages.filter(serverMsg => 
+                        !localHistory.some(localMsg => 
+                            localMsg.timestamp === serverMsg.timestamp && 
+                            localMsg.content === serverMsg.content
+                        )
+                    );
+                    
+                    // 显示新的消息
+                    newMessages.forEach(message => {
+                        const isFromMe = message.sender === this.username;
+                        this.addMessageToDisplay(message, isFromMe);
+                        this.addMessageToLocalHistory(message, isFromMe);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading server chat history:', error);
+                });
+        }
+        
         // 如果没有历史消息，显示提示
-        if (history.length === 0) {
+        if (localHistory.length === 0) {
             if (username === '所有人') {
                 this.addSystemMessage('这是群聊，发送的消息所有在线用户都能看到。');
             } else {
@@ -651,8 +641,8 @@ class ChatClient {
         }
     }
     
-    // 保存聊天历史到本地存储
-    saveChatHistory() {
+    // 保存本地聊天历史
+    saveLocalChatHistory() {
         const obj = {};
         for (const [user, messages] of this.chatHistories) {
             obj[user] = messages;
