@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>局域网点对点聊天</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            display: flex;
+            width: 100%;
+            max-width: 1400px;
+            height: 90vh;
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* 左侧用户面板 */
+        .user-panel {
+            width: 300px;
+            background: #f8f9fa;
+            border-right: 1px solid #e9ecef;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+        
+        .user-info {
+            padding: 20px;
+            background: white;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+        
+        .user-info h2 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 1.5rem;
+        }
+        
+        #username-input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+            margin-bottom: 15px;
+            transition: border-color 0.3s;
+        }
+        
+        #username-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .online-users {
+            flex: 1;
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            overflow-y: auto;
+        }
+        
+        .online-users h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .user-list {
+            list-style: none;
+        }
+        
+        .user-item {
+            padding: 12px 15px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .user-item:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+        }
+        
+        .user-item.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        
+        .user-name {
+            font-weight: 500;
+        }
+        
+        /* 右侧聊天面板 */
+        .chat-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+        
+        .chat-header {
+            padding: 20px;
+            background: white;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .chat-header h2 {
+            color: #333;
+            font-size: 1.5rem;
+        }
+        
+        .current-chat-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .chat-messages {
+            flex: 1;
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .message {
+            max-width: 70%;
+            padding: 15px;
+            border-radius: 15px;
+            position: relative;
+            word-wrap: break-word;
+        }
+        
+        .message.sent {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+        
+        .message.received {
+            align-self: flex-start;
+            background: #f1f3f5;
+            color: #333;
+            border-bottom-left-radius: 5px;
+        }
+        
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 0.85rem;
+            opacity: 0.8;
+        }
+        
+        .message-content {
+            line-height: 1.5;
+        }
+        
+        .file-message {
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            margin-top: 5px;
+        }
+        
+        .file-link {
+            color: inherit;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .image-message {
+            max-width: 300px;
+            border-radius: 10px;
+            margin-top: 5px;
+            cursor: pointer;
+        }
+        
+        .chat-input-area {
+            display: flex;
+            gap: 10px;
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+        
+        #message-input {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+            resize: none;
+            height: 60px;
+            transition: border-color 0.3s;
+        }
+        
+        #message-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .input-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+        
+        .status {
+            padding: 10px 15px;
+            border-radius: 10px;
+            margin-top: 10px;
+            text-align: center;
+            font-weight: 500;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        /* 文件上传模态框 */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .modal-header h3 {
+            color: #333;
+            font-size: 1.5rem;
+        }
+        
+        .close-modal {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #6c757d;
+        }
+        
+        .file-preview {
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        #file-preview-image {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 10px;
+        }
+        
+        #file-name {
+            margin-top: 10px;
+            color: #6c757d;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 1024px) {
+            .container {
+                flex-direction: column;
+                height: auto;
+            }
+            
+            .user-panel {
+                width: 100%;
+                height: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 左侧用户面板 -->
+        <div class="user-panel">
+            <div class="user-info">
+                <h2><i class="fas fa-user"></i> 用户设置</h2>
+                <input type="text" id="username-input" placeholder="请输入用户名" maxlength="20">
+                <button id="connect-btn" class="btn btn-primary">
+                    <i class="fas fa-plug"></i> 连接聊天
+                </button>
+                <button id="disconnect-btn" class="btn btn-danger hidden">
+                    <i class="fas fa-sign-out-alt"></i> 断开连接
+                </button>
+                <div id="connection-status" class="status disconnected">
+                    <i class="fas fa-times-circle"></i> 未连接
+                </div>
+            </div>
+            
+            <div class="online-users">
+                <h3><i class="fas fa-users"></i> 在线用户 (<span id="online-count">0</span>)</h3>
+                <ul id="user-list" class="user-list">
+                    <li class="user-item" data-user="所有人">
+                        <div class="user-avatar">全</div>
+                        <div class="user-name">所有人</div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- 右侧聊天面板 -->
+        <div class="chat-panel">
+            <div class="chat-header">
+                <h2><i class="fas fa-comments"></i> 聊天室</h2>
+                <div class="current-chat-info">
+                    <div class="user-avatar" id="current-chat-avatar">?</div>
+                    <div>
+                        <div id="current-chat-name">未选择聊天对象</div>
+                        <div id="current-chat-status" style="font-size: 0.9rem; color: #6c757d;">请从左侧选择用户</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="chat-messages" class="chat-messages">
+                <div class="message received">
+                    <div class="message-header">
+                        <span class="message-sender">系统</span>
+                        <span class="message-time">刚刚</span>
+                    </div>
+                    <div class="message-content">
+                        欢迎使用局域网点对点聊天系统！请先设置用户名并连接。
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-input-area">
+                <textarea id="message-input" placeholder="输入消息... (按Ctrl+Enter发送)" rows="1"></textarea>
+                <div class="input-buttons">
+                    <button id="file-btn" class="btn btn-secondary btn-icon" title="发送文件">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    <button id="image-btn" class="btn btn-secondary btn-icon" title="发送图片">
+                        <i class="fas fa-image"></i>
+                    </button>
+                    <button id="send-btn" class="btn btn-primary btn-icon" title="发送消息">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 文件上传模态框 -->
+    <div id="file-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-file-upload"></i> 发送文件</h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="file" id="file-input" style="display: none;">
+                <button id="choose-file-btn" class="btn btn-primary">
+                    <i class="fas fa-folder-open"></i> 选择文件
+                </button>
+                <div class="file-preview">
+                    <img id="file-preview-image" src="" alt="预览" class="hidden">
+                    <div id="file-name">未选择文件</div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button id="send-file-btn" class="btn btn-primary" disabled>
+                        <i class="fas fa-paper-plane"></i> 发送文件
+                    </button>
+                    <button id="cancel-file-btn" class="btn btn-secondary">
+                        <i class="fas fa-times"></i> 取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- JavaScript -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script src="chat.js"></script>
+</body>
+</html>
