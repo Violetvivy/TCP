@@ -135,27 +135,22 @@ public class ChatController {
         String receiver = message.getReceiver();
         
         if (receiver == null || "所有人".equals(receiver)) {
-            // 群聊消息：为每个在线用户保存
-            for (String user : onlineUsers) {
-                String chatKey = getChatKey(user, "所有人");
-                chatHistories.computeIfAbsent(chatKey, k -> new ArrayList<>()).add(message);
-                
-                // 限制历史记录大小
-                List<ChatMessage> history = chatHistories.get(chatKey);
-                if (history.size() > 100) {
-                    history.remove(0);
-                }
-            }
+            // 群聊消息：只保存到"所有人"的聊天记录
+            String chatKey = getChatKey(sender, "所有人");
+            chatHistories.computeIfAbsent(chatKey, k -> new ArrayList<>()).add(message);
         } else {
-            // 私聊消息
+            // 私聊消息：保存到双方聊天记录
             String chatKey = getChatKey(sender, receiver);
             chatHistories.computeIfAbsent(chatKey, k -> new ArrayList<>()).add(message);
-            
-            // 限制历史记录大小
-            List<ChatMessage> history = chatHistories.get(chatKey);
-            if (history.size() > 100) {
-                history.remove(0);
-            }
+        }
+        
+        // 限制历史记录大小
+        List<ChatMessage> history = chatHistories.get(getChatKey(
+            receiver == null || "所有人".equals(receiver) ? "所有人" : receiver,
+            sender
+        ));
+        if (history != null && history.size() > 100) {
+            history.remove(0);
         }
     }
     

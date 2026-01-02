@@ -6,6 +6,7 @@ class ChatClient {
         this.currentChatUser = '所有人';
         this.chatHistories = new Map(); // 本地存储的聊天历史
         this.fileToSend = null;
+        this.displayedMessageIds = new Set(); // 已显示的消息ID，防止重复
         
         this.initializeElements();
         this.initializeEventListeners();
@@ -141,8 +142,8 @@ class ChatClient {
             // 获取初始在线用户列表
             this.fetchOnlineUsers();
             
-            // 加载服务器端的聊天历史
-            this.loadServerChatHistory();
+            // 加载当前聊天用户的历史
+            this.loadChatHistoryForUser(this.currentChatUser);
             
         }, (error) => {
             console.error('Connection error: ', error);
@@ -175,6 +176,7 @@ class ChatClient {
         this.connectBtn.classList.remove('hidden');
         this.disconnectBtn.classList.add('hidden');
         this.stompClient = null;
+        this.displayedMessageIds.clear();
         
         // 清空用户列表
         this.updateOnlineUsers(new Set());
@@ -314,15 +316,24 @@ class ChatClient {
         
         // 确定消息属于哪个聊天
         let chatUser;
-        if (isFromMe) {
-            chatUser = message.receiver || '所有人';
+        if (message.receiver === null || message.receiver === '所有人') {
+            // 群聊消息 - 只属于"所有人"聊天
+            chatUser = '所有人';
+        } else if (isFromMe) {
+            // 我发送的私聊消息
+            chatUser = message.receiver;
         } else {
-            chatUser = message.sender === '所有人' ? '所有人' : message.sender;
+            // 我接收的私聊消息
+            chatUser = message.sender;
         }
         
-        // 如果当前正在查看这个聊天，则显示消息
-        if (chatUser === this.currentChatUser) {
+        // 生成消息ID用于去重
+        const messageId = `${message.sender}-${message.timestamp}-${message.content}`;
+        
+        // 如果当前正在查看这个聊天，并且消息未显示过，则显示消息
+        if (chatUser === this.currentChatUser && !this.displayedMessageIds.has(messageId)) {
             this.addMessageToDisplay(message, isFromMe);
+            this.displayedMessageIds.add(messageId);
         }
         
         // 保存到本地聊天历史
@@ -439,8 +450,9 @@ class ChatClient {
         // 更新UI
         this.updateCurrentChatInfo();
         
-        // 清空当前消息显示
+        // 清空当前消息显示和已显示消息记录
         this.chatMessages.innerHTML = '';
+        this.displayedMessageIds.clear();
         
         // 加载该用户的聊天历史
         this.loadChatHistoryForUser(username);
@@ -484,27 +496,6 @@ class ChatClient {
             })
             .catch(error => {
                 console.error('Error fetching online users:', error);
-            });
-    }
-    
-    // 加载服务器端的聊天历史
-    loadServerChatHistory() {
-        if (!this.username) return;
-        
-        // 加载与当前聊天用户的历史
-        const otherUser = this.currentChatUser === '所有人' ? '所有人' : this.currentChatUser;
-        fetch(`/api/chat-history?user1=${this.username}&user2=${otherUser}`)
-            .then(response => response.json())
-            .then(messages => {
-                // 显示历史消息
-                messages.forEach(message => {
-                    const isFromMe = message.sender === this.username;
-                    this.addMessageToDisplay(message, isFromMe);
-                    this.addMessageToLocalHistory(message, isFromMe);
-                });
-            })
-            .catch(error => {
-                console.error('Error loading chat history:', error);
             });
     }
     
@@ -560,26 +551,46 @@ class ChatClient {
     
     // 添加消息到本地聊天历史
     addMessageToLocalHistory(message, isFromMe) {
-        const chatUser = isFromMe ? (message.receiver || '所有人') : 
-                        (message.sender === '所有人' ? '所有人' : message.sender);
+        // 确定消息属于哪个聊天
+        let chatUser;
+        if (message.receiver === null || message.receiver === '所有人') {
+            // 群聊消息 - 只属于"所有人"聊天
+            chatUser = '所有人';
+        } else if (isFromMe) {
+            // 我发送的私聊消息
+            chatUser = message.receiver;
+        } else {
+            // 我接收的私聊消息
+            chatUser = message.sender;
+        }
         
         if (!this.chatHistories.has(chatUser)) {
             this.chatHistories.set(chatUser, []);
         }
         
         const history = this.chatHistories.get(chatUser);
-        history.push({
-            ...message,
-            isFromMe: isFromMe
-        });
         
-        // 限制历史记录大小
-        if (history.length > 100) {
-            history.shift();
+        // 检查是否已存在相同消息（防止重复）
+        const messageExists = history.some(msg => 
+            msg.sender === message.sender && 
+            msg.timestamp === message.timestamp && 
+            msg.content === message.content
+        );
+        
+        if (!messageExists) {
+            history.push({
+                ...message,
+                isFromMe: isFromMe
+            });
+            
+            // 限制历史记录大小
+            if (history.length > 100) {
+                history.shift();
+            }
+            
+            // 保存到本地存储
+            this.saveLocalChatHistory();
         }
-        
-        // 保存到本地存储
-        this.saveLocalChatHistory();
     }
     
     // 加载本地聊天历史
@@ -599,32 +610,63 @@ class ChatClient {
     
     // 加载特定用户的聊天历史
     loadChatHistoryForUser(username) {
-        // 先显示本地历史
+        // 清空当前显示
+        this.chatMessages.innerHTML = '';
+        this.displayedMessageIds.clear();
+        
+        // 显示本地历史
         const localHistory = this.chatHistories.get(username) || [];
         localHistory.forEach(message => {
-            this.addMessageToDisplay(message, message.isFromMe);
+            const messageId = `${message.sender}-${message.timestamp}-${message.content}`;
+            if (!this.displayedMessageIds.has(messageId)) {
+                this.addMessageToDisplay(message, message.isFromMe);
+                this.displayedMessageIds.add(messageId);
+            }
         });
         
-        // 然后加载服务器历史（如果已连接）
+        // 加载服务器历史（如果已连接）
         if (this.stompClient && this.username) {
             const otherUser = username === '所有人' ? '所有人' : username;
             fetch(`/api/chat-history?user1=${this.username}&user2=${otherUser}`)
                 .then(response => response.json())
                 .then(messages => {
-                    // 过滤掉已经显示的消息
-                    const newMessages = messages.filter(serverMsg => 
-                        !localHistory.some(localMsg => 
+                    // 合并本地和服务器消息，去重
+                    const allMessages = [...localHistory];
+                    messages.forEach(serverMsg => {
+                        const exists = allMessages.some(localMsg => 
+                            localMsg.sender === serverMsg.sender && 
                             localMsg.timestamp === serverMsg.timestamp && 
                             localMsg.content === serverMsg.content
-                        )
+                        );
+                        if (!exists) {
+                            const isFromMe = serverMsg.sender === this.username;
+                            allMessages.push({
+                                ...serverMsg,
+                                isFromMe: isFromMe
+                            });
+                        }
+                    });
+                    
+                    // 按时间排序
+                    allMessages.sort((a, b) => 
+                        new Date(a.timestamp) - new Date(b.timestamp)
                     );
                     
-                    // 显示新的消息
-                    newMessages.forEach(message => {
-                        const isFromMe = message.sender === this.username;
-                        this.addMessageToDisplay(message, isFromMe);
-                        this.addMessageToLocalHistory(message, isFromMe);
+                    // 清空并重新显示所有消息
+                    this.chatMessages.innerHTML = '';
+                    this.displayedMessageIds.clear();
+                    
+                    allMessages.forEach(message => {
+                        const messageId = `${message.sender}-${message.timestamp}-${message.content}`;
+                        if (!this.displayedMessageIds.has(messageId)) {
+                            this.addMessageToDisplay(message, message.isFromMe);
+                            this.displayedMessageIds.add(messageId);
+                        }
                     });
+                    
+                    // 更新本地存储
+                    this.chatHistories.set(username, allMessages);
+                    this.saveLocalChatHistory();
                 })
                 .catch(error => {
                     console.error('Error loading server chat history:', error);
