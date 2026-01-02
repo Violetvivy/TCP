@@ -57,28 +57,6 @@ public class ChatController {
     }
     
     /**
-     * 处理用户离开聊天
-     */
-    @MessageMapping("/chat.leave")
-    public void leaveChat(@Payload ChatMessage message) {
-        String username = message.getSender();
-        
-        // 从在线用户列表中移除
-        onlineUsers.remove(username);
-        
-        // 更新消息
-        message.setType(ChatMessage.MessageType.LEAVE);
-        message.setTimestamp(LocalDateTime.now());
-        message.setContent(username + " 离开了聊天");
-        
-        // 广播用户离开消息
-        messagingTemplate.convertAndSend("/topic/public", message);
-        
-        // 发送更新后的在线用户列表
-        sendOnlineUsers();
-    }
-    
-    /**
      * 处理聊天消息
      */
     @MessageMapping("/chat.message")
@@ -95,8 +73,10 @@ public class ChatController {
         if (receiver == null || "所有人".equals(receiver)) {
             messagingTemplate.convertAndSend("/topic/public", message);
         } else {
-            // 私聊：只发送给接收者，不发送回发送者
+            // 私聊：发送给接收者
             messagingTemplate.convertAndSendToUser(receiver, "/queue/private", message);
+            // 同时发送给发送者（通过专用频道，这样发送方也能收到对方的回复）
+            messagingTemplate.convertAndSendToUser(sender, "/queue/private", message);
         }
     }
     

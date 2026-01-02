@@ -242,19 +242,19 @@ class ChatClient {
             timestamp: new Date().toISOString()
         };
         
-        // 生成消息ID用于去重
-        const messageId = `${message.sender}-${message.timestamp}-${message.content}`;
-        
         // 发送消息
         this.stompClient.send('/app/chat.message', {}, JSON.stringify(message));
         
         // 清空输入框
         this.messageInput.value = '';
         
-        // 立即显示发送的消息，并添加到已显示集合
+        // 立即显示发送的消息
         this.addMessageToDisplay(message, true);
-        this.displayedMessageIds.add(messageId);
         this.addMessageToLocalHistory(message, true);
+        
+        // 标记为已发送的消息，WebSocket回发时忽略
+        const messageId = `${message.sender}-${message.timestamp}-${message.content}`;
+        this.displayedMessageIds.add(messageId);
     }
     
     // 发送文件（使用HTTP上传）
@@ -295,16 +295,16 @@ class ChatClient {
             return response.json();
         })
         .then(message => {
-            // 生成消息ID用于去重
-            const messageId = `${message.sender}-${message.timestamp}-${message.content}`;
-            
             // 通过WebSocket发送文件消息
             this.stompClient.send('/app/chat.message', {}, JSON.stringify(message));
             
-            // 立即显示发送的文件消息，并添加到已显示集合
+            // 立即显示发送的文件消息
             this.addMessageToDisplay(message, true);
-            this.displayedMessageIds.add(messageId);
             this.addMessageToLocalHistory(message, true);
+            
+            // 标记为已发送的消息，WebSocket回发时忽略
+            const messageId = `${message.sender}-${message.timestamp}-${message.content}`;
+            this.displayedMessageIds.add(messageId);
             
             // 关闭模态框
             this.closeFileModal();
